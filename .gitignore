@@ -1,0 +1,18 @@
+# Build output
+/target/
+
+# Local-only material that must never reach the public repo
+/_archive/
+/.claude/
+CLAUDE.md
+CLAUDE.local.md
+claude.compact.*.md
+dev-cargo.cmd
+*.log
+
+# Editors and OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
