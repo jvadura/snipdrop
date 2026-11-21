@@ -250,6 +250,103 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    /// Sizes stored in `assets/snipdrop.ico`, the icon embedded in the exe.
+    const ICO_SIZES: [usize; 8] = [16, 20, 24, 32, 40, 48, 64, 256];
+
+    /// The .ico file for the artwork in `render_icon`, so the executable's
+    /// icon and the tray icon come from one definition.
+    fn ico_bytes() -> Vec<u8> {
+        let images: Vec<(usize, Vec<u8>)> = ICO_SIZES
+            .iter()
+            .map(|&size| {
+                let mut bgra = vec![0u8; size * size * 4];
+                render_icon(&mut bgra, size);
+                let data = if size >= 256 {
+                    ico_png_image(&bgra, size)
+                } else {
+                    ico_bmp_image(&bgra, size)
+                };
+                (size, data)
+            })
+            .collect();
+
+        let mut out = Vec::new();
+        out.extend(0u16.to_le_bytes()); // reserved
+        out.extend(1u16.to_le_bytes()); // type: icon
+        out.extend((images.len() as u16).to_le_bytes());
+        let mut offset = 6 + 16 * images.len();
+        for (size, data) in &images {
+            // A dimension byte of 0 means 256.
+            let dimension = if *size >= 256 { 0 } else { *size as u8 };
+            out.extend([dimension, dimension, 0, 0]);
+            out.extend(1u16.to_le_bytes()); // colour planes
+            out.extend(32u16.to_le_bytes()); // bits per pixel
+            out.extend((data.len() as u32).to_le_bytes());
+            out.extend((offset as u32).to_le_bytes());
+            offset += data.len();
+        }
+        for (_, data) in &images {
+            out.extend(data);
+        }
+        out
+    }
+
+    /// Classic icon image: a BITMAPINFOHEADER of double height, bottom-up
+    /// BGRA rows, then an (all zero) 1-bit mask; alpha does the masking.
+    fn ico_bmp_image(bgra: &[u8], size: usize) -> Vec<u8> {
+        let mask_stride = size.div_ceil(32) * 4;
+        let mut out = Vec::new();
+        out.extend(40u32.to_le_bytes());
+        out.extend((size as i32).to_le_bytes());
+        out.extend((size as i32 * 2).to_le_bytes());
+        out.extend(1u16.to_le_bytes());
+        out.extend(32u16.to_le_bytes());
+        out.extend(0u32.to_le_bytes());
+        out.extend(((size * size * 4 + mask_stride * size) as u32).to_le_bytes());
+        out.extend([0u8; 16]);
+        for row in bgra.chunks(size * 4).rev() {
+            out.extend(row);
+        }
+        out.resize(out.len() + mask_stride * size, 0);
+        out
+    }
+
+    /// Large icon images are stored as PNG to keep the file small.
+    fn ico_png_image(bgra: &[u8], size: usize) -> Vec<u8> {
+        let rgba: Vec<u8> = bgra
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[2], p[1], p[0], p[3]])
+            .collect();
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, size as u32, size as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&rgba).unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    /// Regenerate with: set SNIPDROP_WRITE_ICON=1, then `cargo test`.
+    #[test]
+    fn committed_exe_icon_matches_the_artwork() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/snipdrop.ico");
+        let expected = ico_bytes();
+        if std::env::var_os("SNIPDROP_WRITE_ICON").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &expected).unwrap();
+        }
+        let actual = std::fs::read(&path).expect(
+            "assets/snipdrop.ico is missing: run the tests once with SNIPDROP_WRITE_ICON=1",
+        );
+        assert!(
+            actual == expected,
+            "assets/snipdrop.ico is out of date: run the tests once with SNIPDROP_WRITE_ICON=1"
+        );
+    }
+
     #[test]
     fn icon_has_transparent_corners_and_an_opaque_marked_body() {
         for size in [16usize, 20, 24, 32] {

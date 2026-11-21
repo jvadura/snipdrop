@@ -26,15 +26,29 @@ is filled with:
 
 ## Install
 
-Requires [Rust](https://rustup.rs) with the MSVC toolchain.
+Download `snipdrop-<version>-setup.exe` from the
+[latest release](https://github.com/jvadura/snipdrop/releases/latest) and run
+it. It installs for the current user only (no administrator prompt) and asks
+whether to start snipdrop when you sign in and whether to add a desktop
+shortcut.
 
-```
-cargo install --git https://github.com/jvadura/snipdrop
-snipdrop
-```
+The installer is not code-signed, so Windows SmartScreen may show
+"Windows protected your PC" the first time: choose **More info → Run anyway**.
 
-An icon appears in the notification area. Right-click it and tick
-**Start with Windows** to keep it around.
+Other ways:
+
+- **Portable:** download `snipdrop.exe` from the same release and run it.
+  Right-click the tray icon and tick **Start with Windows** to keep it around.
+- **From source:** `cargo install --git https://github.com/jvadura/snipdrop`
+  (needs [Rust](https://rustup.rs) with the MSVC toolchain).
+
+An icon appears in the notification area. Windows 11 tends to tuck new icons
+into the overflow menu; to pin it, open Settings → Personalization → Taskbar →
+*Other system tray icons* and switch snipdrop on. Windows remembers that per
+program location, which is one more reason to use the installer.
+
+Starting snipdrop again while it is running just shows a reminder of the
+hotkey.
 
 ## Use
 
@@ -112,6 +126,20 @@ image paths work the same way.
 cargo build --release
 cargo test
 ```
+
+The installer is an [Inno Setup 6](https://jrsoftware.org/isinfo.php) script:
+
+```
+cargo build --release
+iscc installer\snipdrop.iss
+```
+
+It writes `target\installer\snipdrop-<version>-setup.exe`, taking the version
+from the executable.
+
+The tray icon and the executable's icon are the same artwork, drawn in
+`src/tray.rs`. After changing it, regenerate `assets/snipdrop.ico` by running
+the tests once with `SNIPDROP_WRITE_ICON=1` set.
 
 ## License
 

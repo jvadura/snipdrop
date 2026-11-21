@@ -31,11 +31,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, Unregister
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, GetCursorPos, GetMessageW, HICON, IDI_APPLICATION, KillTimer, LoadIconW,
-    MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage, RegisterClassW,
-    RegisterWindowMessageW, SW_SHOWNORMAL, SetForegroundWindow, SetTimer, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP, WM_CONTEXTMENU,
-    WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_TIMER, WNDCLASSW, WS_OVERLAPPED,
+    DispatchMessageW, FindWindowW, GetCursorPos, GetMessageW, HICON, IDI_APPLICATION, KillTimer,
+    LoadIconW, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
+    RegisterClassW, RegisterWindowMessageW, SW_SHOWNORMAL, SetForegroundWindow, SetTimer,
+    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WM_APP,
+    WM_CONTEXTMENU, WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_TIMER,
+    WNDCLASSW, WS_OVERLAPPED,
 };
 
 use capture::Crop;
@@ -46,6 +47,8 @@ const CLASS_NAME: &str = "snipdrop.main";
 const MUTEX_NAME: &str = "Local\\snipdrop.single-instance";
 
 const WM_TRAY: u32 = WM_APP + 1;
+/// Posted by a second copy of the program to the one already running.
+const WM_ALREADY_RUNNING: u32 = WM_APP + 2;
 const HOTKEY_ID: i32 = 1;
 const MOD_NOREPEAT: u32 = 0x4000;
 const SNIP_TIMER: usize = 1;
@@ -74,10 +77,16 @@ fn main() {
 
     // SAFETY: start-up Win32 calls with valid, NUL-terminated arguments.
     unsafe {
-        // A second copy would fight the first one for the hotkey.
+        // A second copy would fight the first one for the hotkey. Launching
+        // it again (desktop shortcut, Start menu) asks the running copy to
+        // say it is there: its only UI may be hidden in the tray overflow.
         let mutex_name = wide(MUTEX_NAME);
         let mutex = CreateMutexW(null(), 0, mutex_name.as_ptr());
         if !mutex.is_null() && GetLastError() == ERROR_ALREADY_EXISTS {
+            let running = FindWindowW(wide(CLASS_NAME).as_ptr(), wide(APP_NAME).as_ptr());
+            if !running.is_null() {
+                PostMessageW(running, WM_ALREADY_RUNNING, 0, 0);
+            }
             return;
         }
 
@@ -204,6 +213,30 @@ fn report_startup(hotkey_ok: bool, warnings: &[String], first_run: bool) {
             false,
         );
     }
+}
+
+/// Tell the user the app is alive and how to use it. Uses our own toast
+/// rather than a Windows notification, which Do Not Disturb would swallow.
+fn announce_running() {
+    let Some(app) = APP.get() else { return };
+    let instance = app.instance;
+    let detail = format!(
+        "Press {} to snip, or left-click the tray icon.",
+        app.config.hotkey_text
+    );
+    let mut anchor = POINT { x: 0, y: 0 };
+    // SAFETY: valid out-pointer.
+    unsafe { GetCursorPos(&mut anchor) };
+    toast::show(
+        instance,
+        &toast::Message {
+            ok: true,
+            title: "snipdrop is already running",
+            detail: &detail,
+            crop: None,
+            anchor,
+        },
+    );
 }
 
 fn prune_old_snips() {
@@ -442,6 +475,11 @@ unsafe extern "system" fn main_proc(
                 WM_RBUTTONUP | WM_CONTEXTMENU => show_menu(hwnd),
                 _ => {}
             }
+            0
+        }
+
+        WM_ALREADY_RUNNING => {
+            announce_running();
             0
         }
 
